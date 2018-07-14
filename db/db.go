@@ -19,7 +19,8 @@ type Db struct {
 }
 
 // Init - initialise Db
-func (t *Db) Init() {
+func (t *Db) Init(d *sql.DB) {
+	t.db = d
 	sql := `INSERT INTO suz_contacts (id,address,fio) VALUES (NULL, ?, ?)`
 	t.icontact, _ = t.db.Prepare(sql)
 	sql = `SELECT id FROM suz_device_orders WHERE ext_id=?`
