@@ -26,8 +26,8 @@ func (t *Db) Init(d *sql.DB) {
 	t.sorder = `SELECT id FROM suz_device_orders WHERE ext_id=?`
 	t.scontact = `SELECT id FROM suz_contacts WHERE address=? AND fio=?`
 	t.iorder = `INSERT INTO suz_device_orders (id,status_id,executor_id,ext_id,contact_id,mku,comment) VALUES (NULL,1,0,?,?,?,?)`
-	t.iphone = `INSERT INTO suz_contact_phones (id,contact_id,phone) VALUES ?`
-	t.idevice = `INSERT INTO suz_devices_per_order (id,order_id,device_id) VALUES ?`
+	t.iphone = `INSERT INTO suz_contact_phones (id,contact_id,phone) VALUES %s`
+	t.idevice = `INSERT INTO suz_devices_per_order (id,order_id,device_id) VALUES %s`
 	t.sdevices = `SELECT id,model FROM suz_devices ORDER BY LENGTH(model) DESC`
 }
 
@@ -73,7 +73,10 @@ func (t *Db) Insert(o *parser.Order) bool {
 		}
 	}
 	fmt.Println("SQL_VALUES: ", sqlstr)
-	t.db.Exec(t.iphone, sqlstr)
+	_, err = t.db.Exec(fmt.Sprintf(t.iphone, sqlstr))
+	if err != nil {
+		fmt.Println(err.Error())
+	}
 	for i, dev := range o.Devices {
 		if i == 0 {
 			sqlstr = fmt.Sprintf("(NULL,%d,%d)", oid, dev)
@@ -82,7 +85,10 @@ func (t *Db) Insert(o *parser.Order) bool {
 		}
 	}
 	fmt.Println("SQL_VALUES: ", sqlstr)
-	t.db.Exec(t.idevice, sqlstr)
+	_, err = t.db.Exec(fmt.Sprintf(t.idevice, sqlstr))
+	if err != nil {
+		fmt.Println(err.Error())
+	}
 	return true
 }
 

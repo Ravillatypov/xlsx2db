@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -46,8 +47,12 @@ func (p *Parser) ParseRow(r *xlsx.Row, d func(e *Order) bool) int64 {
 	address := r.Cells[3].Value
 	phones := p.Reg.FindAllString(r.Cells[4].Value, -1)
 	name := r.Cells[5].Value
-	comment := r.Cells[5].Value
+	comment := r.Cells[6].Value
 	devids := p.ParseDevices(&comment)
+	if len(devids) == 0 || len(phones) == 0 {
+		fmt.Println("не нашли номера или устройства")
+		return extID
+	}
 	cl := Contact{Name: name, Address: address, Phones: phones}
 	o := &Order{ExtID: extID, Mku: int8(mku), Coment: comment, Devices: devids, Client: cl}
 	d(o)
