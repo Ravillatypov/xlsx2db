@@ -10,71 +10,79 @@ import (
 // Db - type for write to db
 type Db struct {
 	db       *sql.DB
-	scontact *sql.Stmt
-	icontact *sql.Stmt
-	idevice  *sql.Stmt
-	sorder   *sql.Stmt
-	iorder   *sql.Stmt
-	iphone   *sql.Stmt
+	scontact string
+	icontact string
+	idevice  string
+	sdevices string
+	sorder   string
+	iorder   string
+	iphone   string
 }
 
 // Init - initialise Db
 func (t *Db) Init(d *sql.DB) {
 	t.db = d
-	sql := `INSERT INTO suz_contacts (id,address,fio) VALUES (NULL, ?, ?)`
-	t.icontact, _ = t.db.Prepare(sql)
-	sql = `SELECT id FROM suz_device_orders WHERE ext_id=?`
-	t.sorder, _ = t.db.Prepare(sql)
-	sql = `SELECT id FROM suz_contacts WHERE address='?' AND fio='?' `
-	t.scontact, _ = t.db.Prepare(sql)
-	sql = `INSERT INTO suz_device_orders (id,ext_id,contact_id,mku,comment) VALUES (NULL,?,?,?,'?')`
-	t.iorder, _ = t.db.Prepare(sql)
-	sql = `INSERT INTO suz_contact_phones (id,contact_id,phone) VALUES ?`
-	t.iphone, _ = t.db.Prepare(sql)
-	sql = `INSERT INTO suz_devices_per_order (id,order_id,device_id) VALUES ?`
-	t.idevice, _ = t.db.Prepare(sql)
+	t.icontact = `INSERT INTO suz_contacts (id,address,fio) VALUES (NULL, ?, ?)`
+	t.sorder = `SELECT id FROM suz_device_orders WHERE ext_id=?`
+	t.scontact = `SELECT id FROM suz_contacts WHERE address=? AND fio=?`
+	t.iorder = `INSERT INTO suz_device_orders (id,status_id,executor_id,ext_id,contact_id,mku,comment) VALUES (NULL,1,0,?,?,?,?)`
+	t.iphone = `INSERT INTO suz_contact_phones (id,contact_id,phone) VALUES ?`
+	t.idevice = `INSERT INTO suz_devices_per_order (id,order_id,device_id) VALUES ?`
+	t.sdevices = `SELECT id,model FROM suz_devices ORDER BY LENGTH(model) DESC`
 }
 
 // Insert - write order to db
 func (t *Db) Insert(o *parser.Order) bool {
+	if err := t.db.Ping(); err != nil {
+		fmt.Println(err.Error())
+		return false
+	}
 	var ext, cid, oid int64
-	t.sorder.QueryRow(o.ExtID).Scan(&ext)
+	var sqlstr string
+	t.db.QueryRow(t.sorder, o.ExtID).Scan(&ext)
+	fmt.Println("ORD_ID: ", ext)
 	if ext > 0 {
 		return false
 	}
-	_, err := t.icontact.Exec(o.Client.Address, o.Client.Name)
+	res, err := t.db.Exec(t.icontact, o.Client.Address, o.Client.Name)
 	if err != nil {
+		t.db.QueryRow(t.scontact, o.Client.Address, o.Client.Name).Scan(&cid)
+	} else {
+		cid, _ = res.LastInsertId()
+	}
+	if cid == 0 {
 		return false
 	}
-	err = t.scontact.QueryRow(o.Client.Address, o.Client.Name).Scan(&cid)
+	fmt.Println("clientID: ", cid)
+	res, err = t.db.Exec(t.iorder, o.ExtID, cid, o.Mku, o.Coment)
 	if err != nil {
-		return false
+		t.db.QueryRow(t.sorder, o.ExtID).Scan(&oid)
+	} else {
+		oid, _ = res.LastInsertId()
 	}
-	_, err = t.iorder.Exec(o.ExtID, cid, o.Mku, o.Coment)
-	if err != nil {
-		return false
-	}
-	t.sorder.QueryRow(o.ExtID).Scan(&oid)
 	if oid == 0 {
+		fmt.Println(err.Error())
 		return false
 	}
-	sql := ""
+	fmt.Println("OrderID: ", oid)
 	for i, phone := range o.Client.Phones {
 		if i == 0 {
-			sql = fmt.Sprintf("(NULL,%d,'%s')", cid, phone)
+			sqlstr = fmt.Sprintf("(NULL,%d,'%s')", cid, phone)
 		} else {
-			sql += fmt.Sprintf(",(NULL,%d,'%s')", cid, phone)
+			sqlstr = fmt.Sprintf("%s,(NULL,%d,'%s')", sqlstr, cid, phone)
 		}
 	}
-	t.iphone.Exec(sql)
+	fmt.Println("SQL_VALUES: ", sqlstr)
+	t.db.Exec(t.iphone, sqlstr)
 	for i, dev := range o.Devices {
 		if i == 0 {
-			sql = fmt.Sprintf("(NULL,%d,%d)", oid, dev)
+			sqlstr = fmt.Sprintf("(NULL,%d,%d)", oid, dev)
 		} else {
-			sql += fmt.Sprintf(",(NULL,%d,%d)", oid, dev)
+			sqlstr = fmt.Sprintf("%s,(NULL,%d,%d)", sqlstr, oid, dev)
 		}
 	}
-	t.idevice.Exec(sql)
+	fmt.Println("SQL_VALUES: ", sqlstr)
+	t.db.Exec(t.idevice, sqlstr)
 	return true
 }
 
@@ -82,24 +90,42 @@ func (t *Db) Insert(o *parser.Order) bool {
 func (t *Db) Run(ch chan *parser.Order) {
 	select {
 	case o := <-ch:
-		t.Insert(o)
+		fmt.Printf("row: ext: %d\tname: %s,\taddress:\t%s,\tcomment: %s\n", o.ExtID, o.Client.Name, o.Client.Address, o.Coment)
+		_ = t.Insert(o)
+	default:
+		fmt.Println("wait...")
 	}
 }
 
 // GetDevices - get devices list
 func (t *Db) GetDevices() ([]parser.Device, error) {
-	sql := `SELECT id,model FROM suz_devices ORDER BY LENGTH(model) DESC`
-	devs := make([]parser.Device, 0)
-	var dev parser.Device
-	res, err := t.db.Query(sql)
+	var devs []parser.Device
+	var id int8
+	var mod string
+	if err := t.db.Ping(); err != nil {
+		fmt.Println(err.Error())
+		return devs, err
+	}
+
+	sdevices, _ := t.db.Prepare(t.sdevices)
+	defer sdevices.Close()
+	err := t.db.Ping()
 	if err != nil {
+		fmt.Println(err.Error())
+		return devs, err
+	}
+	res, err := sdevices.Query()
+	defer res.Close()
+	if err != nil {
+		fmt.Println(err.Error())
 		return devs, err
 	}
 	for res.Next() {
-		err = res.Scan(&dev)
+		err = res.Scan(&id, &mod)
 		if err != nil {
-			devs = append(devs, dev)
+			fmt.Println(err.Error())
 		}
+		devs = append(devs, parser.Device{ID: id, Model: mod})
 	}
 	return devs, nil
 

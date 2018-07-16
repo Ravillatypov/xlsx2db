@@ -27,14 +27,13 @@ func main() {
 		os.Exit(-2)
 	}
 	T := DB.Db{}
+	T.Init(mdb)
 	devs, err := T.GetDevices()
 	if err != nil {
 		os.Exit(-3)
 	}
 	re, _ := regexp.Compile(`[0-9]{11}`)
 	P := parser.Parser{Devices: devs, Reg: *re}
-	T.Init(mdb)
-	ch := make(chan *parser.Order)
 	xlsFile, err := xlsx.OpenFile(filename)
 	if err != nil {
 		fmt.Println(err.Error())
@@ -42,7 +41,6 @@ func main() {
 	}
 	sheet := xlsFile.Sheets[0]
 	for _, r := range sheet.Rows {
-		go P.ParseRow(r, ch)
+		P.ParseRow(r, T.Insert)
 	}
-	T.Run(ch)
 }

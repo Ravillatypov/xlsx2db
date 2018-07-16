@@ -36,7 +36,7 @@ type Parser struct {
 }
 
 // ParseRow получает строку xlsx, парсит и отправляет заявку через канал
-func (p *Parser) ParseRow(r *xlsx.Row, ch chan *Order) int64 {
+func (p *Parser) ParseRow(r *xlsx.Row, d func(e *Order) bool) int64 {
 	extID, err := r.Cells[1].Int64()
 	if err != nil {
 		return extID
@@ -49,7 +49,8 @@ func (p *Parser) ParseRow(r *xlsx.Row, ch chan *Order) int64 {
 	comment := r.Cells[5].Value
 	devids := p.ParseDevices(&comment)
 	cl := Contact{Name: name, Address: address, Phones: phones}
-	ch <- &Order{ExtID: extID, Mku: int8(mku), Coment: comment, Devices: devids, Client: cl}
+	o := &Order{ExtID: extID, Mku: int8(mku), Coment: comment, Devices: devids, Client: cl}
+	d(o)
 	return extID
 }
 
